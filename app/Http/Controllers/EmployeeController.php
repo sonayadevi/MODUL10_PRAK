@@ -7,37 +7,19 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Models\Employee;
 use App\Models\Position;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+use RealRashid\SweetAlert\Facades\Alert;
 
 class EmployeeController extends Controller
+{public function index()
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
-    {
-        $pageTitle = 'Employee List';
+    $pageTitle = 'Employee List';
+    confirmDelete();
+    return view('employee.index', compact('pageTitle'));
 
-        // RAW SQL QUERY
-        // $employees = DB::select('
-        //     select *, employees.id as employee_id
-        //     from employees
-        //     left join positions on employees.position_id = positions.id
-        // ');
+}
 
-        // Query Builder
-        // $employees = DB::table('employees')
-        //     ->select('employees.*', 'employees.id as employee_id', 'positions.*')
-        //     ->leftJoin('positions', 'employees.position_id', '=', 'positions.id')
-        //     ->get();
-
-        // Eloquent
-        $employees = Employee::all();
-
-        return view('employee.index', [
-            'pageTitle' => $pageTitle,
-            'employees' => $employees
-        ]);
-    }
 
     /**
      * Show the form for creating a new resource.
@@ -72,7 +54,7 @@ class EmployeeController extends Controller
         $validator = Validator::make($request->all(), [
             'firstName' => 'required',
             'lastName' => 'required',
-            'email' => 'required|email|unique:employees,email,',
+            'email' => 'required|email',
             'age' => 'required|numeric',
         ], $messages);
 
@@ -80,26 +62,35 @@ class EmployeeController extends Controller
             return redirect()->back()->withErrors($validator)->withInput();
         }
 
-        // INSERT QUERY Builder
-        // DB::table('employees')->insert([
-        //     'firstname'=> $request->firstName,
-        //     'lastname'=> $request->lastName,
-        //     'email'=> $request->email,
-        //     'age'=> $request->age,
-        //     'position_id'=> $request->position,
-        // ]);
+        // Get File
+        $file = $request->file('cv');
+        $originalFilename = $file->getClientOriginalName();
+        $encryptedFilename = $file->hashName();
 
-        // Eloquent
+        // Store File
+        $file->store('public/files');
+
+        // ELOQUENT
         $employee = New Employee;
         $employee->firstname = $request->firstName;
         $employee->lastname = $request->lastName;
         $employee->email = $request->email;
         $employee->age = $request->age;
         $employee->position_id = $request->position;
+        $employee->original_filename = $originalFilename;
+        $employee->encrypted_filename = $encryptedFilename;
         $employee->save();
 
+        Alert::success('Added Successfully', 'Employee Data Added Successfully.');
+
         return redirect()->route('employees.index');
+
     }
+
+
+
+
+
 
     /**
      * Display the specified resource.
@@ -172,6 +163,10 @@ class EmployeeController extends Controller
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator);
         }
+        Alert::success('Changed Successfully', 'Employee Data Changed Successfully.');
+
+        return redirect()->route('employees.index');
+
 
         // QUERY BUILDER
         // DB::table('employees')
@@ -184,30 +179,62 @@ class EmployeeController extends Controller
         // ]);
 
         // ELOQUENT
-        $employee = Employee::find($id);
-        $employee->firstname = $request->firstName;
-        $employee->lastname = $request->lastName;
-        $employee->email = $request->email;
-        $employee->age = $request->age;
-        $employee->position_id = $request->position;
-        $employee->save();
 
-        return redirect()->route('employees.index');
     }
+
 
     /**
      * Remove the specified resource from storage.
      */
     public function destroy(string $id)
+        {
+            // QUERY BUILDER
+            // DB::table('employees')
+            // ->where('id', $id)
+            // ->delete();
+            $employee = Employee::find($id);
+            $encryptedFilename = 'public/files/'.$employee->encrypted_filename;
+            Storage::delete($encryptedFilename);
+
+            // ELOQUENT
+            Employee::find($id)->delete();
+
+            return redirect()->route('employees.index');
+
+            // Eloquent
+
+
+            Employee::find($id)->delete();
+
+            Alert::success('Deleted Successfully', 'Employee Data Deleted Successfully.');
+
+            return redirect()->route('employees.index');
+
+    }
+    public function downloadFile($employeeId)
     {
-        // QUERY BUILDER
-        // DB::table('employees')
-        // ->where('id', $id)
-        // ->delete();
+        $employee = Employee::find($employeeId);
+        $encryptedFilename = 'public/files/'.$employee->encrypted_filename;
+        $downloadFilename = Str::lower($employee->firstname.'_'.$employee->lastname.'_cv.pdf');
 
-        // Eloquent
-        Employee::find($id)->delete();
+        if(Storage::exists($encryptedFilename)) {
+            return Storage::download($encryptedFilename, $downloadFilename);
+        }
+    }
 
-        return redirect()->route('employees.index');
+    public function getData(Request $request)
+{
+    $employees = Employee::with('position');
+
+    if ($request->ajax()) {
+        return datatables()->of($employees)
+            ->addIndexColumn()
+            ->addColumn('actions', function($employee) {
+                return view('employee.actions', compact('employee'));
+            })
+            ->toJson();
     }
 }
+
+}
+
